@@ -100,3 +100,14 @@ async def get_metrics():
         successful_requests=_metrics["success"],
         avg_inference_ms=round(avg, 2),
     )
+
+
+@app.post("/predict/batch", response_model=BatchPredictResponse)
+def predict_batch(request: BatchPredictRequest):
+    t_total = time.perf_counter()
+    results = []
+    for img_b64 in request.images_base64:
+        img = _decode_image(img_b64)
+        results.append(_run_inference(img, request.model_name, request.confidence))
+    total_ms = (time.perf_counter() - t_total) * 1000
+    return BatchPredictResponse(results=results, total_inference_ms=round(total_ms, 2))
