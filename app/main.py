@@ -77,18 +77,30 @@ async def health_check():
 
 @app.post("/predict", response_model=PredictResponse)
 def predict(request: PredictRequest):
+    request_id = str(_uuid.uuid4())[:8]
     _metrics["total"] += 1
+
+    log_event("predict_start", request_id=request_id,
+              model=request.model_name, confidence=request.confidence)
+
     try:
         img = _load_image_from_request(request)
         result = _run_inference(img, request.model_name, request.confidence)
         _metrics["success"] += 1
         _metrics["total_ms"] += result.inference_ms
+
+        log_event("predict_complete", request_id=request_id,
+                  model=result.model_used, detections=len(result.detections),
+                  inference_ms=result.inference_ms,
+                  image_size=f"{result.image_width}x{result.image_height}")
         return result
     except HTTPException:
         raise
     except FileNotFoundError as e:
+        log_event("predict_error", level="ERROR", request_id=request_id, reason=str(e))
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        log_event("predict_error", level="ERROR", request_id=request_id, reason=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -111,3 +123,19 @@ def predict_batch(request: BatchPredictRequest):
         results.append(_run_inference(img, request.model_name, request.confidence))
     total_ms = (time.perf_counter() - t_total) * 1000
     return BatchPredictResponse(results=results, total_inference_ms=round(total_ms, 2))
+
+
+# ── Logging estruturado ──────────────────────────────────────
+import json as _json
+import uuid as _uuid
+
+
+def log_event(event: str, level: str = "INFO", **kwargs):
+    """Emite um evento estruturado em JSON para stdout."""
+    record = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "level": level,
+        "event": event,
+        **kwargs,
+    }
+    print(_json.dumps(record, ensure_ascii=False), flush=True)
